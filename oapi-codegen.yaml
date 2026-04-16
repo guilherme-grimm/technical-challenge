@@ -1,0 +1,13 @@
+# Paths in this file are resolved relative to the CWD at generation time.
+# The go:generate directive in internal/api/gen.go runs from that
+# directory, so `openapi/server.gen.go` lands at internal/api/openapi/.
+# The `internal/api/openapi/` directory is gitignored — it is
+# regenerated on every `make generate` from api/openapi.yaml.
+package: openapi
+output: openapi/server.gen.go
+generate:
+  std-http-server: true
+  models: true
+  embedded-spec: true
+output-options:
+  skip-prune: false
