@@ -1,0 +1,437 @@
+openapi: 3.0.3
+info:
+  title: Devices API
+  version: 0.1.0
+  description: |
+    REST API for managing physical devices. Supports create, read, update
+    (full and partial), delete, and cursor-paginated listing with optional
+    filters on brand and state.
+
+    Concurrency control uses an integer `version` field on each device.
+    Clients must echo the last-seen `version` in update/patch payloads; a
+    mismatch returns 409.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: devices
+    description: Device CRUD and listing
+  - name: health
+    description: Operational probes
+
+paths:
+  /devices:
+    post:
+      tags: [devices]
+      operationId: createDevice
+      summary: Create a device
+      description: Registers a new device. `id`, `created_at`, and `version` are server-assigned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDeviceRequest"
+      responses:
+        "201":
+          description: Device created
+          headers:
+            Location:
+              description: URL of the newly created device
+              schema:
+                type: string
+                example: /devices/01HWQ8F3M7Y4C6J5B2K1N9P0XR
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+    get:
+      tags: [devices]
+      operationId: listDevices
+      summary: List devices
+      description: |
+        Returns a page of devices ordered by `id` (ULID) ascending. Use the
+        returned `next_cursor` as the `cursor` query parameter on the next
+        call. An empty `next_cursor` indicates the final page.
+      parameters:
+        - $ref: "#/components/parameters/BrandQuery"
+        - $ref: "#/components/parameters/StateQuery"
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: Page of devices
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceListResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /devices/{id}:
+    parameters:
+      - $ref: "#/components/parameters/DeviceIDPath"
+
+    get:
+      tags: [devices]
+      operationId: getDevice
+      summary: Fetch a device by id
+      responses:
+        "200":
+          description: The device
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+    put:
+      tags: [devices]
+      operationId: updateDevice
+      summary: Replace a device
+      description: |
+        Full replacement of the mutable fields. Supply the current `version`;
+        the server rejects the request with 409 on mismatch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateDeviceRequest"
+      responses:
+        "200":
+          description: Device updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+    patch:
+      tags: [devices]
+      operationId: patchDevice
+      summary: Partially update a device
+      description: |
+        Only the provided fields are applied. `version` is required for
+        optimistic locking.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchDeviceRequest"
+      responses:
+        "200":
+          description: Device updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+    delete:
+      tags: [devices]
+      operationId: deleteDevice
+      summary: Delete a device
+      description: Deletes a device. Devices in state `in-use` cannot be deleted (409).
+      responses:
+        "204":
+          description: Device deleted
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalServerError" }
+
+  /healthz:
+    get:
+      tags: [health]
+      operationId: healthCheck
+      summary: Liveness and dependency probe
+      description: Returns `ok` when the process is up and the database is reachable.
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+        "503":
+          description: Unhealthy — a dependency is unreachable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+
+components:
+  parameters:
+    DeviceIDPath:
+      name: id
+      in: path
+      required: true
+      description: Device identifier (ULID, 26 Crockford base32 characters).
+      schema:
+        type: string
+        pattern: "^[0-9A-HJKMNP-TV-Z]{26}$"
+        example: 01HWQ8F3M7Y4C6J5B2K1N9P0XR
+
+    BrandQuery:
+      name: brand
+      in: query
+      required: false
+      description: Filter by exact brand match.
+      schema:
+        type: string
+        example: Acme
+
+    StateQuery:
+      name: state
+      in: query
+      required: false
+      description: Filter by device state.
+      schema:
+        $ref: "#/components/schemas/State"
+
+    CursorQuery:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque pagination cursor (the last `id` from the previous page).
+      schema:
+        type: string
+        pattern: "^[0-9A-HJKMNP-TV-Z]{26}$"
+        example: 01HWQ8F3M7Y4C6J5B2K1N9P0XR
+
+    LimitQuery:
+      name: limit
+      in: query
+      required: false
+      description: Maximum items per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+        example: 50
+
+  schemas:
+    State:
+      type: string
+      description: Lifecycle state of a device.
+      enum:
+        - available
+        - in-use
+        - inactive
+      x-enum-varnames:
+        - StateAvailable
+        - StateInUse
+        - StateInactive
+      example: available
+
+    Device:
+      type: object
+      description: A registered device.
+      required: [id, name, brand, state, created_at, version]
+      properties:
+        id:
+          type: string
+          description: Server-assigned ULID.
+          example: 01HWQ8F3M7Y4C6J5B2K1N9P0XR
+        name:
+          type: string
+          description: Human-readable device name.
+          example: Label Printer A1
+        brand:
+          type: string
+          description: Manufacturer or brand name.
+          example: Acme
+        state:
+          $ref: "#/components/schemas/State"
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp in RFC 3339 (UTC). Immutable.
+          example: "2026-04-16T09:12:33Z"
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonically increasing version for optimistic locking.
+          example: 3
+
+    CreateDeviceRequest:
+      type: object
+      description: Payload for creating a new device.
+      required: [name, brand]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Human-readable device name.
+          example: Label Printer A1
+        brand:
+          type: string
+          minLength: 1
+          description: Manufacturer or brand name.
+          example: Acme
+        state:
+          allOf:
+            - $ref: "#/components/schemas/State"
+          description: Optional initial state. Defaults to `available` when omitted.
+
+    UpdateDeviceRequest:
+      type: object
+      description: Full replacement payload. All mutable fields are required.
+      required: [name, brand, state, version]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          example: Label Printer A1
+        brand:
+          type: string
+          minLength: 1
+          example: Acme
+        state:
+          $ref: "#/components/schemas/State"
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The `version` observed on the last read.
+          example: 3
+
+    PatchDeviceRequest:
+      type: object
+      description: |
+        Partial update payload. Only provided fields are applied.
+        `version` is required for optimistic locking.
+      required: [version]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          example: Label Printer A1
+        brand:
+          type: string
+          minLength: 1
+          example: Acme
+        state:
+          $ref: "#/components/schemas/State"
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+          description: The `version` observed on the last read.
+          example: 3
+
+    DeviceListResponse:
+      type: object
+      description: A page of devices plus the cursor for the next page.
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          description: Devices in this page, sorted by `id` ascending.
+          items:
+            $ref: "#/components/schemas/Device"
+        next_cursor:
+          type: string
+          description: Cursor for the next page. Empty string when there are no more pages.
+          example: 01HWQ8F3M7Y4C6J5B2K1N9P0XR
+
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          description: "`ok` when healthy, `degraded` when a dependency is unreachable."
+          enum: [ok, degraded]
+          example: ok
+        details:
+          type: object
+          additionalProperties:
+            type: string
+          description: Per-dependency status messages.
+          example:
+            mongo: ok
+
+    ErrorResponse:
+      type: object
+      description: Standard error envelope.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code.
+          example: device_not_found
+        message:
+          type: string
+          description: Human-readable error message.
+          example: device not found
+        details:
+          type: object
+          additionalProperties: true
+          description: Optional structured context (e.g., per-field validation errors).
+
+  responses:
+    BadRequest:
+      description: Malformed request (invalid JSON, bad query params, schema violation).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            code: bad_request
+            message: invalid request body
+
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            code: device_not_found
+            message: device not found
+
+    Conflict:
+      description: |
+        Conflict. Either an optimistic-locking `version` mismatch, or an
+        operation disallowed by the device's current state (e.g., deleting
+        an in-use device).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            code: version_conflict
+            message: device version does not match
+
+    UnprocessableEntity:
+      description: Semantically invalid request (e.g., unknown state value).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            code: invalid_state
+            message: state must be one of available, in-use, inactive
+
+    InternalServerError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            code: internal_error
+            message: internal server error
