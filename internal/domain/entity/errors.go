@@ -6,7 +6,7 @@ var (
 	ErrDeviceNotFound         = errors.New("device not found")
 	ErrVersionConflict        = errors.New("version conflict")
 	ErrDeviceInUse            = errors.New("device in use")
-	ErrEmptyDatabase          = errors.New("empty database")
+	ErrEmptyClient              = errors.New("empty database")
 	ErrEmptyLogger            = errors.New("empty logger")
 	ErrEmptyDeviceCreateInput = errors.New("empty device create input")
 	ErrEmptyDeviceName        = errors.New("empty device name")

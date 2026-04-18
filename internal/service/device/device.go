@@ -29,7 +29,7 @@ type Service struct {
 
 func New(db database.Service, log *zap.Logger) (*Service, error) {
 	if db == nil {
-		return nil, entity.ErrEmptyDatabase
+		return nil, entity.ErrEmptyClient
 	}
 
 	if log == nil {
