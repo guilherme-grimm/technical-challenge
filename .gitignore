@@ -29,7 +29,7 @@ go.work.sum
 
 # Generated code (regenerated via `make generate`)
 /internal/api/openapi/
-/internal/device/mocks/
+/bin
 
 # Editor/IDE
 # .idea/
