@@ -15,8 +15,9 @@ Few rules the service enforces:
 
 You need docker and docker-compose.
 Populate the .env file with your mongo connection string.
-Run `make generate` to generate the openapi server stubs.
 Make sure you have a mongo instance running. Be it via docker compose, be it locally.
+
+openapi stubs are generated automatically. `make build`, `make test` and `make run` all depend on `make generate`, which nukes `internal/api/openapi/` and rebuilds it from `internal/api/openapi.yaml`. the Dockerfile does the same on build, so `docker compose up --build` works on a fresh clone.
 
 ## Running
 

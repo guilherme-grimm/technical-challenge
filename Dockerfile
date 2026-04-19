@@ -5,7 +5,8 @@ RUN go mod download
 
 FROM deps AS builder
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN go generate ./... \
+    && CGO_ENABLED=0 GOOS=linux go build \
         -trimpath -ldflags="-s -w" \
         -o /out/api ./cmd/api
 
