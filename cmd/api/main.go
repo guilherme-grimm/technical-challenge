@@ -1,7 +1,3 @@
-// Command api is the entrypoint for the Devices API. It wires the logger,
-// HTTP handler, and server, then blocks until SIGINT/SIGTERM triggers a
-// graceful shutdown. Config, Mongo, middleware, and validation are not
-// wired yet — each TODO below marks a seam to be filled in.
 package main
 
 import (
@@ -20,22 +16,17 @@ import (
 	"technical-challenge/internal/api/openapi"
 	"technical-challenge/internal/config"
 	"technical-challenge/internal/domain/gateway"
+	"technical-challenge/internal/resource/database"
 )
 
-// Defaults to avoid badly populated config
-const (
-	defaultAddr            = ":8080"
-	defaultShutdownTimeout = 15 * time.Second
-	defaultReadTimeout     = 15 * time.Second
-	defaultWriteTimeout    = 15 * time.Second
-	defaultIdleTimeout     = 60 * time.Second
-)
+const defaultMaxBytes = 1024 * 1024 * 10
 
 func main() {
 	logger, err := zap.NewProduction()
 	if err != nil {
 		panic(err)
 	}
+	defer func() { _ = logger.Sync() }()
 
 	cfg, err := config.New()
 	if err != nil {
@@ -46,50 +37,46 @@ func main() {
 		zap.String("addr", cfg.Addr),
 		zap.String("database", cfg.Database),
 		zap.String("collection", cfg.Collection))
-	defer func() { _ = logger.Sync() }()
 
-	bootCtx, bootCancel := context.WithTimeout(context.Background(), time.Second*10)
+	bootCtx, bootCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer bootCancel()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	logger.Info("connecting to database")
 	db, err := setupDatabase(bootCtx, logger, cfg.URI, cfg.Database, cfg.Collection)
 	if err != nil {
 		logger.Fatal("failed to connect to database", zap.Error(err))
 	}
-	defer func() { _ = db.Close(bootCtx) }()
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer closeCancel()
+		_ = db.Close(closeCtx)
+	}()
 
 	logger.Info("database connected")
 
-	logger.Info("creating service")
 	svc, err := setupService(logger, db)
 	if err != nil {
 		logger.Fatal("failed to create service", zap.Error(err))
 	}
 
-	logger.Info("starting server")
-	if err := run(ctx, logger, svc); err != nil {
+	if err := run(logger, cfg, svc, db); err != nil {
 		logger.Fatal("server exited with error", zap.Error(err))
 	}
 }
 
-const defaultMaxBytes = 1024 * 1024 * 10
-
-func run(ctx context.Context, logger *zap.Logger, svc gateway.DeviceService) error {
-	handler := api.NewHandler(logger, svc)
+func run(logger *zap.Logger, cfg *config.Config, svc gateway.DeviceService, db database.Service) error {
+	handler := api.NewHandler(logger, svc, db)
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/yaml")
-		w.Write(api.OpenAPISpec)
+		_, _ = w.Write(api.OpenAPISpec)
 	})
 
 	mux.HandleFunc("GET /docs", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html charset=utf-8")
-		w.Write(api.OpenAPIHTML)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(api.OpenAPIHTML)
 	})
 	httpHandler := openapi.HandlerFromMux(handler, mux)
 
@@ -106,12 +93,13 @@ func run(ctx context.Context, logger *zap.Logger, svc gateway.DeviceService) err
 		api.MaxBytes(defaultMaxBytes),
 		api.CORS(),
 		validator)
+
 	srv := &http.Server{
-		Addr:         defaultAddr,
+		Addr:         cfg.Addr,
 		Handler:      chain,
-		ReadTimeout:  defaultReadTimeout,
-		WriteTimeout: defaultWriteTimeout,
-		IdleTimeout:  defaultIdleTimeout,
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+		IdleTimeout:  cfg.IdleTimeout,
 	}
 
 	serverErr := make(chan error, 1)
@@ -134,7 +122,10 @@ func run(ctx context.Context, logger *zap.Logger, svc gateway.DeviceService) err
 		return err
 	}
 
-	if err := srv.Shutdown(ctx); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("graceful shutdown failed, forcing close", zap.Error(err))
 		_ = srv.Close()
 		return err

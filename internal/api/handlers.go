@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -11,15 +13,21 @@ import (
 	"technical-challenge/internal/domain/gateway"
 )
 
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
+
 type Handler struct {
 	logger *zap.Logger
 	svc    gateway.DeviceService
+	db     Pinger
 }
 
-func NewHandler(logger *zap.Logger, svc gateway.DeviceService) *Handler {
+func NewHandler(logger *zap.Logger, svc gateway.DeviceService, db Pinger) *Handler {
 	return &Handler{
 		logger: logger,
 		svc:    svc,
+		db:     db,
 	}
 }
 
@@ -99,8 +107,19 @@ func (h *Handler) DeleteDevice(w http.ResponseWriter, r *http.Request, id openap
 }
 
 func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
-	// TODO: ping Mongo and report degraded on failure
-	writeJSON(w, http.StatusOK, openapi.HealthResponse{
-		Status: openapi.Ok,
-	})
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second*5)
+	defer cancel()
+
+	if err := h.db.Ping(ctx); err != nil {
+		details := map[string]string{
+			"database": err.Error(),
+		}
+		writeJSON(w, http.StatusServiceUnavailable, openapi.HealthResponse{
+			Status:  openapi.Degraded,
+			Details: &details,
+		})
+
+		return
+	}
+	writeJSON(w, http.StatusOK, openapi.HealthResponse{Status: openapi.Ok})
 }

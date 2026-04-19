@@ -37,7 +37,7 @@ type Device struct {
 	Name      string    `bson:"name"`
 	Brand     string    `bson:"brand"`
 	State     State     `bson:"state"`
-	CreatedAt time.Time `bson:"created_on"`
+	CreatedAt time.Time `bson:"created_at"`
 	Version   int64     `bson:"version"`
 }
 

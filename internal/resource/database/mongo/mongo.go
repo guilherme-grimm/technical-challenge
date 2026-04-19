@@ -11,10 +11,9 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 	"go.uber.org/zap"
 )
-
-// NOTE: No need to validate input, validate in the upper layer
 
 var _ database.Service = (*Service)(nil)
 
@@ -45,6 +44,9 @@ func (s *Service) Create(ctx context.Context, device *entity.Device) error {
 		zap.String("id", device.ID),
 	)
 	_, err := s.collection.InsertOne(ctx, device)
+	if mongo.IsDuplicateKeyError(err) {
+		return entity.ErrDuplicateID
+	}
 	if err != nil {
 		log.Error("failed to insert device", zap.Error(err))
 		return err
@@ -201,4 +203,8 @@ func (s *Service) List(ctx context.Context, filter *gateway.DeviceListFilter) (*
 
 func (s *Service) Close(ctx context.Context) error {
 	return s.client.Disconnect(ctx)
+}
+
+func (s *Service) Ping(ctx context.Context) error {
+	return s.client.Ping(ctx, readpref.Primary())
 }

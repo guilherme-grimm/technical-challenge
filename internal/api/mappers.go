@@ -74,7 +74,7 @@ func toListFilter(req openapi.ListDevicesParams) *gateway.DeviceListFilter {
 		f.Cursor = *req.Cursor
 	}
 
-	if req.Limit != nil {
+	if req.Limit != nil && *req.Limit > 0 {
 		f.Limit = *req.Limit
 	}
 
