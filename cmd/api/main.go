@@ -93,12 +93,19 @@ func run(ctx context.Context, logger *zap.Logger, svc gateway.DeviceService) err
 	})
 	httpHandler := openapi.HandlerFromMux(handler, mux)
 
+	validator, err := api.OpenAPIValidator(api.OpenAPISpec)
+	if err != nil {
+		logger.Error("failed to create openapi validator", zap.Error(err))
+		return err
+	}
+
 	chain := api.Chain(httpHandler,
 		api.Recovery(logger),
 		api.RequestID(),
 		api.RequestLogger(logger),
 		api.MaxBytes(defaultMaxBytes),
-		api.CORS())
+		api.CORS(),
+		validator)
 	srv := &http.Server{
 		Addr:         defaultAddr,
 		Handler:      chain,

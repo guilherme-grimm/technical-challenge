@@ -3,11 +3,15 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"net/http"
 	"runtime/debug"
 	"technical-challenge/internal/logger"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/getkin/kin-openapi/routers/gorillamux"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 )
@@ -99,13 +103,52 @@ func CORS() func(http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID")
 
-			if r.Method == http.MethodOptions  {
+			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func OpenAPIValidator(spec []byte) (func(http.Handler) http.Handler, error) {
+	loader := openapi3.NewLoader()
+	doc, err := loader.LoadFromData(spec)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load openapi spec: %w", err)
+	}
+
+	if err := doc.Validate(loader.Context); err != nil {
+		return nil, fmt.Errorf("failed to validate openapi spec: %w", err)
+	}
+
+	router, err := gorillamux.NewRouter(doc)
+	if err != nil {
+		return nil, fmt.Errorf("build openapi router: %w", err)
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			route, pathParams, err := router.FindRoute(r)
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			input := &openapi3filter.RequestValidationInput{
+				Request:    r,
+				Route:      route,
+				PathParams: pathParams,
+			}
+
+			if err := openapi3filter.ValidateRequest(r.Context(), input); err != nil {
+				writeError(w, http.StatusBadRequest, "validation_error", err.Error())
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}, nil
 }
 
 // Chaining made simple, ugly to read tho
