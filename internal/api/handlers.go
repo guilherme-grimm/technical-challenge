@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"go.uber.org/zap"
@@ -14,43 +16,86 @@ type Handler struct {
 	svc    gateway.DeviceService
 }
 
-func NewHandler(logger *zap.Logger) *Handler {
-	return &Handler{logger: logger}
+func NewHandler(logger *zap.Logger, svc gateway.DeviceService) *Handler {
+	return &Handler{
+		logger: logger,
+		svc:    svc,
+	}
 }
 
 var _ openapi.ServerInterface = (*Handler)(nil)
 
 func (h *Handler) CreateDevice(w http.ResponseWriter, r *http.Request) {
-	// TODO: decode openapi.CreateDeviceJSONRequestBody, call the service,
-	// map errors via writeDomainError, write 201 + Location
-	writeError(w, http.StatusNotImplemented, "not_implemented", "createDevice is not implemented")
+	var body openapi.CreateDeviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "invalid request body")
+		return
+	}
+
+	d, err := h.svc.Create(r.Context(), toCreateInput(body))
+	if err != nil {
+		writeDomainError(w, h.logger, err)
+		return
+	}
+	w.Header().Set("Location", fmt.Sprintf("/devices/%s", d.ID))
+	writeJSON(w, http.StatusCreated, toOpenAPIDevice(d))
 }
 
 func (h *Handler) ListDevices(w http.ResponseWriter, r *http.Request, params openapi.ListDevicesParams) {
-	// TODO: translate params into device.Filter, call the service, marshal
-	// into openapi.DeviceListResponse
-	writeError(w, http.StatusNotImplemented, "not_implemented", "listDevices is not implemented")
+	page, err := h.svc.List(r.Context(), toListFilter(params))
+	if err != nil {
+		writeDomainError(w, h.logger, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toOpenAPIPage(page))
 }
 
 func (h *Handler) GetDevice(w http.ResponseWriter, r *http.Request, id openapi.DeviceIDPath) {
-	// TODO: call the service, map ErrDeviceNotFound → 404
-	writeError(w, http.StatusNotImplemented, "not_implemented", "getDevice is not implemented")
+	d, err := h.svc.Get(r.Context(), id)
+	if err != nil {
+		writeDomainError(w, h.logger, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toOpenAPIDevice(d))
 }
 
 func (h *Handler) UpdateDevice(w http.ResponseWriter, r *http.Request, id openapi.DeviceIDPath) {
-	// TODO: decode UpdateDeviceJSONRequestBody, call the service, map
-	// ErrVersionConflict → 409, ErrDeviceNotFound → 404
-	writeError(w, http.StatusNotImplemented, "not_implemented", "updateDevice is not implemented")
+	var body openapi.UpdateDeviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "invalid request body")
+		return
+	}
+
+	d, err := h.svc.Update(r.Context(), id, toUpdateInput(body))
+	if err != nil {
+		writeDomainError(w, h.logger, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toOpenAPIDevice(d))
 }
 
 func (h *Handler) PatchDevice(w http.ResponseWriter, r *http.Request, id openapi.DeviceIDPath) {
-	// TODO: decode PatchDeviceJSONRequestBody, call the service
-	writeError(w, http.StatusNotImplemented, "not_implemented", "patchDevice is not implemented")
+	var body openapi.PatchDeviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", "invalid request body")
+		return
+	}
+
+	d, err := h.svc.Patch(r.Context(), id, toPatchInput(body))
+	if err != nil {
+		writeDomainError(w, h.logger, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toOpenAPIDevice(d))
 }
 
 func (h *Handler) DeleteDevice(w http.ResponseWriter, r *http.Request, id openapi.DeviceIDPath) {
-	// TODO: call the service, map ErrDeviceInUse → 409
-	writeError(w, http.StatusNotImplemented, "not_implemented", "deleteDevice is not implemented")
+	if err := h.svc.Delete(r.Context(), id); err != nil {
+		writeDomainError(w, h.logger, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
@@ -59,4 +104,3 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		Status: openapi.Ok,
 	})
 }
-

@@ -13,10 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/joho/godotenv/autoload"
 	"go.uber.org/zap"
 
 	"technical-challenge/internal/api"
 	"technical-challenge/internal/api/openapi"
+	"technical-challenge/internal/config"
+	"technical-challenge/internal/domain/gateway"
 )
 
 // Defaults to avoid badly populated config
@@ -33,26 +36,72 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	cfg, err := config.New()
+	if err != nil {
+		logger.Fatal("failed to load config", zap.Error(err))
+	}
+
+	logger.Info("config loaded",
+		zap.String("addr", cfg.Addr),
+		zap.String("database", cfg.Database),
+		zap.String("collection", cfg.Collection))
 	defer func() { _ = logger.Sync() }()
 
-	if err := run(logger); err != nil {
+	bootCtx, bootCancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer bootCancel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger.Info("connecting to database")
+	db, err := setupDatabase(bootCtx, logger, cfg.URI, cfg.Database, cfg.Collection)
+	if err != nil {
+		logger.Fatal("failed to connect to database", zap.Error(err))
+	}
+	defer func() { _ = db.Close(bootCtx) }()
+
+	logger.Info("database connected")
+
+	logger.Info("creating service")
+	svc, err := setupService(logger, db)
+	if err != nil {
+		logger.Fatal("failed to create service", zap.Error(err))
+	}
+
+	logger.Info("starting server")
+	if err := run(ctx, logger, svc); err != nil {
 		logger.Fatal("server exited with error", zap.Error(err))
 	}
 }
 
-func run(logger *zap.Logger) error {
-	// TODO: connect to Mongo, ping, defer client.Disconnect. injecting svcs here
-	handler := api.NewHandler(logger)
+const defaultMaxBytes = 1024 * 1024 * 10
+
+func run(ctx context.Context, logger *zap.Logger, svc gateway.DeviceService) error {
+	handler := api.NewHandler(logger, svc)
 
 	mux := http.NewServeMux()
 
-	// TODO: register GET /docs (Swagger UI) and GET /openapi.yaml before wiring the generated routes
+	mux.HandleFunc("GET /openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/yaml")
+		w.Write(api.OpenAPISpec)
+	})
+
+	mux.HandleFunc("GET /docs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html charset=utf-8")
+		w.Write(api.OpenAPIHTML)
+	})
 	httpHandler := openapi.HandlerFromMux(handler, mux)
 
-	// TODO: wrap httpHandler with the middleware chain: recovery -> request ID -> logging -> MaxBytesReader -> CORS -> kin-openapi validator -> routing
+	chain := api.Chain(httpHandler,
+		api.Recovery(logger),
+		api.RequestID(),
+		api.RequestLogger(logger),
+		api.MaxBytes(defaultMaxBytes),
+		api.CORS())
 	srv := &http.Server{
 		Addr:         defaultAddr,
-		Handler:      httpHandler,
+		Handler:      chain,
 		ReadTimeout:  defaultReadTimeout,
 		WriteTimeout: defaultWriteTimeout,
 		IdleTimeout:  defaultIdleTimeout,
@@ -77,9 +126,6 @@ func run(logger *zap.Logger) error {
 	case err := <-serverErr:
 		return err
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), defaultShutdownTimeout)
-	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
 		logger.Error("graceful shutdown failed, forcing close", zap.Error(err))

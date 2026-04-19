@@ -13,6 +13,19 @@ func (s State) Valid() bool {
 	}
 }
 
+func (s State) String() string {
+	switch s {
+	case StateAvailable:
+		return "available"
+	case StateInUse:
+		return "in-use"
+	case StateInactive:
+		return "inactive"
+	default:
+		return ""
+	}
+}
+
 const (
 	StateAvailable State = "available"
 	StateInUse     State = "in-use"

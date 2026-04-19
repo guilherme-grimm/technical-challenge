@@ -19,6 +19,7 @@ import (
 var _ database.Service = (*Service)(nil)
 
 type Service struct {
+	client     *mongo.Client
 	collection *mongo.Collection
 	log        *zap.Logger
 }
@@ -34,6 +35,7 @@ func New(client *mongo.Client, database, collection string, log *zap.Logger) (*S
 	return &Service{
 		collection: client.Database(database).Collection(collection),
 		log:        log,
+		client:     client,
 	}, nil
 }
 
@@ -195,4 +197,8 @@ func (s *Service) List(ctx context.Context, filter *gateway.DeviceListFilter) (*
 		Items:      items,
 		NextCursor: next,
 	}, nil
+}
+
+func (s *Service) Close(ctx context.Context) error {
+	return s.client.Disconnect(ctx)
 }

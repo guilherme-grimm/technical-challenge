@@ -18,4 +18,5 @@ type Service interface {
 	Update(ctx context.Context, id string, input *gateway.DeviceUpdateInput) (*entity.Device, error)
 	Patch(ctx context.Context, id string, input *gateway.DevicePatchInput) (*entity.Device, error)
 	Delete(ctx context.Context, id string) error
+	Close(ctx context.Context) error
 }
