@@ -11,6 +11,13 @@ Few rules the service enforces:
 - `in-use` devices cant be deleted (409)
 - version mismatch on update/patch returns 409
 
+## Before you start
+
+You need docker and docker-compose.
+Populate the .env file with your mongo connection string.
+Run `make generate` to generate the openapi server stubs.
+Make sure you have a mongo instance running. Be it via docker compose, be it locally.
+
 ## Running
 
 Easiest way:
@@ -63,3 +70,13 @@ ids are ULIDs, server assigned. pagination is cursor based, grab the `next_curso
 openapi server stubs under `internal/api/openapi/` are generated and gitignored, `make generate` rebuilds them from `internal/api/openapi.yaml`.
 
 cors is wide open right now, fine for this but obviously wouldnt ship it like that.
+
+## Following up
+
+There are things that could be improved, such as:
+- instrumentation w victoriametrics, combined with the tracing logs
+- properly add different databases to check the performance-
+- stress testing
+- better error handling w/ a proper error type and custom metrics logic
+
+
